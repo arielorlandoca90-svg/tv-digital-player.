@@ -1,0 +1,216 @@
+HTML
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV DIGITAL PLAYER</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080b14;color:white;font-family:Arial,sans-serif}
+header{padding:20px;background:#101729;text-align:center}
+.logo{font-size:27px;font-weight:bold;color:#38bdf8}
+nav{display:flex;gap:8px;padding:12px;overflow:auto}
+button{background:#18253b;color:white;border:1px solid #263c5c;padding:12px;border-radius:9px}
+button.active{background:#087fc1}
+main{padding:15px}
+input{width:100%;padding:14px;margin:7px 0;background:#111c2e;border:1px solid #30415d;border-radius:8px;color:white}
+#login{max-width:450px;margin:35px auto}
+#login button{width:100%;background:#087fc1}
+#home{display:none}
+h2{font-size:19px}
+#featured{display:flex;gap:12px;overflow:hidden}
+.poster{min-width:125px;width:125px;height:180px;object-fit:cover;border-radius:10px;background:#17243a}
+#items{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.item{background:#111c2e;border-radius:10px;padding:8px;min-width:0}
+.item img{width:100%;height:135px;object-fit:cover;border-radius:7px}
+.item button{width:100%;margin-top:7px}
+#player{width:100%;background:black;max-height:300px;margin-top:15px}
+#status{color:#38bdf8;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+<div class="logo">TV DIGITAL PLAYER</div>
+<div id="status">Tu entretenimiento sin límites</div>
+</header>
+
+<section id="login">
+<h2>Conectar servicio IPTV</h2>
+<input id="server" placeholder="Servidor URL (http://servidor:puerto)">
+<input id="username" placeholder="Usuario">
+<input id="password" type="password" placeholder="Contraseña">
+<button onclick="connect()">CONECTAR</button>
+<p id="error"></p>
+</section>
+
+<section id="home">
+<nav>
+<button class="active" onclick="showHome()">Inicio</button>
+<button onclick="loadContent('get_live_streams')">TV en vivo</button>
+<button onclick="loadContent('get_vod_streams')">Películas</button>
+<button onclick="loadContent('get_series')">Series</button>
+<button onclick="logout()">Salir</button>
+</nav>
+
+<main>
+<h2>ESTRENOS DESTACADOS</h2>
+<div id="featured"></div>
+<h2 id="heading">Bienvenido</h2>
+<div id="items"></div>
+<video id="player" controls autoplay playsinline></video>
+</main>
+</section>
+
+<script>
+let base='',user='',pass='',timer=null,streams=[];
+
+function api(action){
+return `${base}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&action=${action}`;
+}
+
+async function connect(){
+base=document.getElementById('server').value.trim().replace(/\/+$/,'');
+user=document.getElementById('username').value.trim();
+pass=document.getElementById('password').value;
+const error=document.getElementById('error');
+
+if(!base||!user||!pass){
+error.textContent='Completa todos los campos';
+return;
+}
+error.textContent='Conectando...';
+
+try{
+let r=await fetch(api('get_account_info'));
+let data=await r.json();
+if(!data.user_info || data.user_info.auth!=1) throw Error('Datos incorrectos');
+
+document.getElementById('login').style.display='none';
+document.getElementById('home').style.display='block';
+document.getElementById('status').textContent='Conectado correctamente';
+showHome();
+}catch(e){
+error.textContent='No se pudo conectar. Revisa servidor, usuario y contraseña.';
+}
+}
+
+function showHome(){
+document.getElementById('heading').textContent='Inicio';
+loadContent('get_vod_streams');
+}
+
+async function loadContent(action){
+clearInterval(timer);
+const heading=document.getElementById('heading');
+const items=document.getElementById('items');
+heading.textContent=action==='get_live_streams'?'TV EN VIVO':action==='get_vod_streams'?'PELÍCULAS':'SERIES';
+items.innerHTML='Cargando contenido...';
+
+try{
+const response=await fetch(api(action));
+const data=await response.json();
+if(!Array.isArray(data))throw Error();
+streams=data;
+render(data,action);
+}catch(e){
+items.innerHTML='No se pudo cargar el contenido. Comprueba el servidor.';
+}
+}
+
+function render(data,action){
+const items=document.getElementById('items');
+items.innerHTML='';
+data.slice(0,100).forEach(item=>{
+const name=item.name||'Contenido';
+const image=item.stream_icon||item.cover||'';
+const id=item.stream_id||item.series_id;
+const div=document.createElement('div');
+div.className='item';
+
+const img=document.createElement('img');
+img.src=image;
+img.alt=name;
+img.onerror=()=>img.style.display='none';
+
+const title=document.createElement('div');
+title.textContent=name;
+
+const btn=document.createElement('button');
+btn.textContent=action==='get_live_streams'?'VER CANAL':'REPRODUCIR';
+btn.onclick=()=>play(item,action);
+
+div.append(img,title,btn);
+items.append(div);
+});
+if(!data.length)items.textContent='No hay contenido disponible';
+}
+
+function play(item,action){
+const video=document.getElementById('player');
+let url='';
+
+if(action==='get_live_streams'){
+url=`${base}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${item.stream_id}.m3u8`;
+}else if(action==='get_vod_streams'){
+url=`${base}/movie/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${item.stream_id}.mp4`;
+}else{
+document.getElementById('status').textContent='Las series requieren seleccionar un episodio';
+return;
+}
+
+if(window.playerHls){
+window.playerHls.destroy();
+window.playerHls=null;
+}
+video.pause();
+video.src='';
+
+if(Hls.isSupported() && url.endsWith('.m3u8')){
+const hls=new Hls();
+window.playerHls=hls;
+hls.loadSource(url);
+hls.attachMedia(video);
+hls.on(Hls.Events.MANIFEST_PARSED,()=>video.play().catch(()=>{}));
+}else{
+video.src=url;
+video.play().catch(()=>{});
+}
+document.getElementById('status').textContent='Reproduciendo: '+item.name;
+video.scrollIntoView({behavior:'smooth'});
+}
+
+function logout(){
+clearInterval(timer);
+if(window.playerHls)window.playerHls.destroy();
+document.getElementById('home').style.display='none';
+document.getElementById('login').style.display='block';
+document.getElementById('status').textContent='Tu entretenimiento sin límites';
+}
+
+showFeatured();
+
+function showFeatured(){
+const box=document.getElementById('featured');
+const samples=[
+'https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg',
+'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg',
+'https://image.tmdb.org/t/p/w500/kQs6keheMwCxJxrzV83VUwFtHkB.jpg'
+];
+let index=0;
+function change(){
+box.innerHTML='';
+const img=document.createElement('img');
+img.className='poster';
+img.src=samples[index];
+box.append(img);
+index=(index+1)%samples.length;
+}
+change();
+setInterval(change,4000);
+}
+</script>
+</body>
+</html>
